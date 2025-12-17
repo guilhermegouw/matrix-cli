@@ -2,7 +2,11 @@
 package config
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+
+	"github.com/guilhermegouw/matrix-cli/internal/oauth"
 )
 
 const (
@@ -58,6 +62,8 @@ type ProviderConfig struct {
 	ProviderOptions map[string]any `json:"provider_options,omitempty"`
 	// Models holds the available models from this provider.
 	Models []catwalk.Model `json:"models,omitempty"`
+	// OAuthToken for providers that use OAuth2 authentication.
+	OAuthToken *oauth.Token `json:"oauth,omitempty"`
 	// ID is the unique identifier for the provider.
 	ID string `json:"id,omitempty"`
 	// Name is the human-readable name for display.
@@ -68,8 +74,24 @@ type ProviderConfig struct {
 	BaseURL string `json:"base_url,omitempty"`
 	// APIKey is the authentication key.
 	APIKey string `json:"api_key,omitempty"`
+	// SystemPromptPrefix is prepended to system prompts for this provider.
+	SystemPromptPrefix string `json:"-"`
 	// Disable marks the provider as disabled.
 	Disable bool `json:"disable,omitempty"`
+}
+
+// SetupClaudeCode configures the provider for Claude Code OAuth authentication.
+func (pc *ProviderConfig) SetupClaudeCode() {
+	if pc.OAuthToken == nil {
+		return
+	}
+	pc.APIKey = fmt.Sprintf("Bearer %s", pc.OAuthToken.AccessToken)
+	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
+	if pc.ExtraHeaders == nil {
+		pc.ExtraHeaders = make(map[string]string)
+	}
+	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"
+	pc.ExtraHeaders["anthropic-beta"] = "oauth-2025-04-20"
 }
 
 // Config is the top-level configuration structure.
