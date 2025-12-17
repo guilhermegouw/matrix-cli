@@ -27,11 +27,10 @@ jobs:
       - name: Verify Go version
         run: /usr/local/go/bin/go version
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
+      - name: Install and run golangci-lint
+        run: |
+          /usr/local/go/bin/go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          ~/go/bin/golangci-lint run --timeout=5m
 
   test:
     name: Test
