@@ -53,7 +53,7 @@ func ExchangeToken(ctx context.Context, code, verifier string) (*oauth.Token, er
 		"code_verifier": verifier,
 	}
 
-	resp, err := request(ctx, "POST", "https://console.anthropic.com/v1/oauth/token", reqBody)
+	resp, err := request(ctx, "https://console.anthropic.com/v1/oauth/token", reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func RefreshToken(ctx context.Context, refreshToken string) (*oauth.Token, error
 		"client_id":     clientID,
 	}
 
-	resp, err := request(ctx, "POST", "https://console.anthropic.com/v1/oauth/token", reqBody)
+	resp, err := request(ctx, "https://console.anthropic.com/v1/oauth/token", reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -107,13 +107,13 @@ func RefreshToken(ctx context.Context, refreshToken string) (*oauth.Token, error
 	return &token, nil
 }
 
-func request(ctx context.Context, method, endpoint string, body any) (*http.Response, error) {
+func request(ctx context.Context, endpoint string, body any) (*http.Response, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
