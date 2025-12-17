@@ -1,6 +1,6 @@
 # Provider System Documentation
 
-This document provides comprehensive documentation for the provider system introduced in [PR #2](https://github.com/guilhermegouw/matrix-cli/pull/2), including the configuration system, quality tooling, and development workflow.
+This document provides comprehensive documentation for the provider system, including the configuration system, authentication methods, quality tooling, and development workflow.
 
 ## Table of Contents
 
@@ -10,11 +10,17 @@ This document provides comprehensive documentation for the provider system intro
   - [Provider Builder](#provider-builder)
   - [Catwalk Integration](#catwalk-integration)
   - [Fantasy Integration](#fantasy-integration)
+- [Authentication](#authentication)
+  - [API Key Authentication](#api-key-authentication)
+  - [OAuth2 Authentication (Claude Account)](#oauth2-authentication-claude-account)
+  - [Token Management](#token-management)
 - [Configuration System](#configuration-system)
   - [Configuration Loading](#configuration-loading)
   - [Configuration Structure](#configuration-structure)
   - [Environment Variable Resolution](#environment-variable-resolution)
   - [Provider Configuration](#provider-configuration)
+  - [First-Run Detection](#first-run-detection)
+  - [Configuration Persistence](#configuration-persistence)
 - [Quality Tooling](#quality-tooling)
   - [GitHub Actions CI](#github-actions-ci)
   - [golangci-lint Configuration](#golangci-lint-configuration)
@@ -32,8 +38,10 @@ Key features:
 - **Two-tier model system**: Large models for complex tasks, small models for simpler tasks
 - **Catwalk integration**: Provider metadata and model information from Charm's catwalk service
 - **Fantasy integration**: LLM orchestration through Charm's fantasy library
+- **OAuth2 with PKCE**: Secure authentication for Claude Account subscriptions
 - **Environment variable resolution**: Secure configuration with `$VAR` and `${VAR}` syntax
 - **Provider caching**: Performance optimization with embedded fallback
+- **Token refresh**: Automatic OAuth token renewal support
 
 ---
 
@@ -113,6 +121,162 @@ Fantasy is Charm's LLM orchestration library providing a unified interface acros
 **Special handling**:
 - **Anthropic thinking mode**: Automatically adds `anthropic-beta: interleaved-thinking-2025-05-14` header when `think: true`
 - **OAuth tokens**: Detects `Bearer ` prefix and handles authorization header correctly
+
+---
+
+## Authentication
+
+Matrix CLI supports two authentication methods for LLM providers.
+
+### API Key Authentication
+
+The traditional method using provider-issued API keys.
+
+**Configuration**:
+```json
+{
+  "providers": {
+    "anthropic": {
+      "api_key": "$ANTHROPIC_API_KEY"
+    },
+    "openai": {
+      "api_key": "sk-..."
+    }
+  }
+}
+```
+
+**Features**:
+- Supports environment variable references (`$VAR`, `${VAR}`)
+- Keys are validated during configuration loading
+- Providers with invalid/missing keys are automatically skipped
+
+### OAuth2 Authentication (Claude Account)
+
+For Anthropic Claude, Matrix CLI supports OAuth2 authentication with PKCE (Proof Key for Code Exchange), enabling users with Claude Account subscriptions to authenticate without managing API keys.
+
+**Implementation**: `internal/oauth/claude/`
+
+#### OAuth2 Flow
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Matrix    │     │   Browser   │     │  Claude.ai  │
+│     CLI     │     │             │     │             │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       │ 1. Generate PKCE  │                   │
+       │    verifier +     │                   │
+       │    challenge      │                   │
+       │                   │                   │
+       │ 2. Open auth URL ─┼──────────────────►│
+       │                   │                   │
+       │                   │ 3. User logs in   │
+       │                   │    and authorizes │
+       │                   │◄──────────────────│
+       │                   │                   │
+       │ 4. User pastes    │                   │
+       │◄── auth code ─────│                   │
+       │                   │                   │
+       │ 5. Exchange code ─┼──────────────────►│
+       │    + verifier     │                   │
+       │                   │                   │
+       │◄── 6. Tokens ─────┼──────────────────│
+       │                   │                   │
+```
+
+#### PKCE Challenge Generation
+
+**Implementation**: `internal/oauth/claude/challenge.go`
+
+```go
+func GetChallenge() (verifier, challenge string, err error) {
+    bytes := make([]byte, 32)
+    rand.Read(bytes)
+    verifier = encodeBase64(bytes)
+    hash := sha256.Sum256([]byte(verifier))
+    challenge = encodeBase64(hash[:])
+    return verifier, challenge, nil
+}
+```
+
+- Generates 32-byte random verifier
+- Creates SHA-256 hash for challenge
+- Uses URL-safe Base64 encoding (no padding)
+
+#### Authorization URL
+
+**Implementation**: `internal/oauth/claude/oauth.go:19-35`
+
+| Parameter | Value |
+|-----------|-------|
+| Endpoint | `https://claude.ai/oauth/authorize` |
+| Client ID | `9d1c250a-e61b-44d9-88ed-5944d1962f5e` |
+| Redirect URI | `https://console.anthropic.com/oauth/code/callback` |
+| Response Type | `code` |
+| Scopes | `org:create_api_key`, `user:profile`, `user:inference` |
+| Code Challenge Method | `S256` |
+
+#### Token Exchange
+
+**Implementation**: `internal/oauth/claude/oauth.go:37-77`
+
+After the user authorizes and receives a code:
+
+```go
+func ExchangeToken(ctx context.Context, code, verifier string) (*oauth.Token, error)
+```
+
+- Endpoint: `https://console.anthropic.com/v1/oauth/token`
+- Grant type: `authorization_code`
+- Returns access token, refresh token, and expiration
+
+#### Token Refresh
+
+**Implementation**: `internal/oauth/claude/oauth.go:79-108`
+
+```go
+func RefreshToken(ctx context.Context, refreshToken string) (*oauth.Token, error)
+```
+
+- Endpoint: `https://console.anthropic.com/v1/oauth/token`
+- Grant type: `refresh_token`
+- Used when access token expires
+
+### Token Management
+
+**Implementation**: `internal/oauth/token.go`
+
+```go
+type Token struct {
+    AccessToken  string `json:"access_token"`
+    RefreshToken string `json:"refresh_token"`
+    ExpiresIn    int    `json:"expires_in"`
+    ExpiresAt    int64  `json:"expires_at"`
+}
+```
+
+**Key methods**:
+- `SetExpiresAt()`: Calculates absolute expiration time from `ExpiresIn`
+- `IsExpired()`: Returns true if token is expired or within 10% of expiration
+
+**Expiration buffer**: Tokens are considered expired when within 10% of their lifetime remaining, allowing proactive refresh before actual expiration.
+
+**Storage**: OAuth tokens are stored in the config file:
+```json
+{
+  "providers": {
+    "anthropic": {
+      "oauth": {
+        "access_token": "...",
+        "refresh_token": "...",
+        "expires_in": 3600,
+        "expires_at": 1702828800
+      }
+    }
+  }
+}
+```
 
 ---
 
@@ -215,6 +379,66 @@ The resolver (`internal/config/resolve.go`) expands environment variables in con
 - Returns error if referenced variable is not set
 - Providers with unresolvable API keys are skipped (not fatal)
 - Base URLs fall back to catwalk defaults if not set
+
+### First-Run Detection
+
+**Implementation**: `internal/config/firstrun.go`
+
+Matrix CLI detects first-run scenarios to trigger the setup wizard.
+
+```go
+func IsFirstRun() bool
+func NeedsSetup() bool
+```
+
+**`IsFirstRun()` returns true when**:
+- No global config file exists at `$XDG_CONFIG_HOME/matrix/matrix.json`
+- Config fails to load (e.g., invalid JSON)
+- No providers have API keys configured
+
+**`NeedsSetup()` returns true when**:
+- Config fails to load
+- No models are configured
+- Configured models reference invalid/disabled providers
+
+### Configuration Persistence
+
+**Implementation**: `internal/config/save.go`
+
+The save system uses minimal structs to avoid persisting runtime-only data.
+
+**SaveConfig structure**:
+```go
+type SaveConfig struct {
+    Models    map[SelectedModelType]SelectedModel
+    Providers map[string]*SaveProviderConfig
+    Options   *Options
+}
+
+type SaveProviderConfig struct {
+    APIKey     string       `json:"api_key,omitempty"`
+    OAuthToken *oauth.Token `json:"oauth,omitempty"`
+}
+```
+
+**Key functions**:
+
+| Function | Purpose |
+|----------|---------|
+| `Save(cfg)` | Saves to global config path |
+| `SaveToFile(cfg, path)` | Saves to specific file |
+| `SaveWizardResult(...)` | Saves API key wizard result |
+| `SaveWizardResultWithOAuth(...)` | Saves OAuth wizard result |
+
+**What gets saved**:
+- Model selections (large/small)
+- Provider API keys or OAuth tokens
+- Application options
+
+**What doesn't get saved**:
+- Catwalk provider metadata
+- Resolved API key values
+- Runtime state
 
 ### Provider Configuration
 
@@ -397,12 +621,26 @@ matrix-cli/
 ├── internal/
 │   ├── config/
 │   │   ├── config.go     # Config structures and types
+│   │   ├── firstrun.go   # First-run detection
 │   │   ├── load.go       # Configuration loading logic
 │   │   ├── providers.go  # Catwalk provider integration
-│   │   └── resolve.go    # Environment variable resolver
-│   └── provider/
-│       ├── provider.go   # Provider builder and model creation
-│       └── tier.go       # Tier selection utilities
+│   │   ├── resolve.go    # Environment variable resolver
+│   │   └── save.go       # Configuration persistence
+│   ├── oauth/
+│   │   ├── token.go      # OAuth token struct
+│   │   └── claude/
+│   │       ├── challenge.go  # PKCE verifier/challenge
+│   │       └── oauth.go      # Claude OAuth2 implementation
+│   ├── provider/
+│   │   ├── provider.go   # Provider builder and model creation
+│   │   └── tier.go       # Tier selection utilities
+│   └── tui/              # Terminal UI (see tui-wizard.md)
+│       ├── tui.go
+│       ├── keys.go
+│       ├── page/
+│       ├── util/
+│       ├── styles/
+│       └── components/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml        # GitHub Actions workflow
@@ -425,3 +663,12 @@ Key external dependencies:
 | `charm.land/fantasy` | LLM orchestration |
 | `charm.land/fantasy/providers/anthropic` | Anthropic provider |
 | `charm.land/fantasy/providers/openai` | OpenAI provider |
+| `charm.land/bubbletea/v2` | Terminal UI framework |
+| `charm.land/bubbles/v2` | TUI components |
+| `charm.land/lipgloss/v2` | Terminal styling |
+
+---
+
+## Related Documentation
+
+- [TUI and Setup Wizard](./tui-wizard.md) - Terminal UI and first-run wizard documentation
