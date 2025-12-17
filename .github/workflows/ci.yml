@@ -17,17 +17,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Go tip
+      - name: Install Go 1.25
         run: |
-          go install golang.org/dl/gotip@latest
-          gotip download
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          echo "GOROOT=$(gotip env GOROOT)" >> $GITHUB_ENV
+          wget -q https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+          sudo rm -rf /usr/local/go
+          sudo tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
 
-      - name: Use gotip
-        run: |
-          sudo cp -r $(gotip env GOROOT)/* /usr/local/go/
-          go version
+      - name: Verify Go version
+        run: /usr/local/go/bin/go version
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
@@ -42,15 +40,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Go tip
+      - name: Install Go 1.25
         run: |
-          go install golang.org/dl/gotip@latest
-          gotip download
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          wget -q https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+          sudo rm -rf /usr/local/go
+          sudo tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+
+      - name: Download dependencies
+        run: /usr/local/go/bin/go mod download
 
       - name: Run tests
-        run: |
-          gotip test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: /usr/local/go/bin/go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -67,14 +68,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Go tip
+      - name: Install Go 1.25
         run: |
-          go install golang.org/dl/gotip@latest
-          gotip download
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          wget -q https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+          sudo rm -rf /usr/local/go
+          sudo tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
 
       - name: Build
-        run: gotip build -v ./...
+        run: /usr/local/go/bin/go build -v ./...
 
   security:
     name: Security Scan
@@ -83,13 +85,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Go tip
+      - name: Install Go 1.25
         run: |
-          go install golang.org/dl/gotip@latest
-          gotip download
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          wget -q https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+          sudo rm -rf /usr/local/go
+          sudo tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
 
       - name: Run govulncheck
         run: |
-          gotip install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          /usr/local/go/bin/go install golang.org/x/vuln/cmd/govulncheck@latest
+          ~/go/bin/govulncheck ./...
