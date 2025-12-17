@@ -17,11 +17,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "gotip"
-          cache: true
+      - name: Install Go tip
+        run: |
+          go install golang.org/dl/gotip@latest
+          gotip download
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          echo "GOROOT=$(gotip env GOROOT)" >> $GITHUB_ENV
+
+      - name: Use gotip
+        run: |
+          sudo cp -r $(gotip env GOROOT)/* /usr/local/go/
+          go version
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
@@ -36,17 +42,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "gotip"
-          cache: true
-
-      - name: Download dependencies
-        run: go mod download
+      - name: Install Go tip
+        run: |
+          go install golang.org/dl/gotip@latest
+          gotip download
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: |
+          gotip test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -63,14 +67,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "gotip"
-          cache: true
+      - name: Install Go tip
+        run: |
+          go install golang.org/dl/gotip@latest
+          gotip download
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Build
-        run: go build -v ./...
+        run: gotip build -v ./...
 
   security:
     name: Security Scan
@@ -79,13 +83,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "gotip"
-          cache: true
+      - name: Install Go tip
+        run: |
+          go install golang.org/dl/gotip@latest
+          gotip download
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Run govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          gotip install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
